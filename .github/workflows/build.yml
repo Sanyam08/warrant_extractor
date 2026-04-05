@@ -14,9 +14,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install pdfplumber openpyxl pyinstaller
+        run: pip install pdfplumber openpyxl pytesseract pdf2image pyinstaller
       - name: Build exe
-        run: pyinstaller --onefile --windowed warrant_extractor.py
+        run: pyinstaller --onefile --windowed --hidden-import=pytesseract --hidden-import=pdf2image warrant_extractor.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -31,9 +31,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install pdfplumber openpyxl pyinstaller
+        run: pip install pdfplumber openpyxl pytesseract pdf2image pyinstaller
       - name: Build app
-        run: pyinstaller --onefile --windowed warrant_extractor.py
+        run: pyinstaller --onefile --windowed --hidden-import=pytesseract --hidden-import=pdf2image warrant_extractor.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
