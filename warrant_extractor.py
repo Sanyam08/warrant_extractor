@@ -44,7 +44,9 @@ def extract_warrant_data(pdf_path):
                 "page": page_num,
                 "name": "",
                 "address": "",
-                "city_state_zip": "",
+                "city": "",
+                "state": "",
+                "zip_code": "",
                 "total": "",
             }
 
@@ -65,7 +67,15 @@ def extract_warrant_data(pdf_path):
 
                 record["name"] = " ".join(w["text"] for w in name_words).strip()
                 record["address"] = " ".join(w["text"] for w in addr_words).strip()
-                record["city_state_zip"] = " ".join(w["text"] for w in csz_words).strip()
+                csz_full = " ".join(w["text"] for w in csz_words).strip()
+                # Parse "MANCHESTER CT 06040-1234" into city, state, zip
+                csz_parts = csz_full.rsplit(" ", 2)  # split from right: [city, state, zip]
+                if len(csz_parts) == 3:
+                    record["city"] = csz_parts[0]
+                    record["state"] = csz_parts[1]
+                    record["zip_code"] = csz_parts[2]
+                else:
+                    record["city"] = csz_full
 
                 if total_words:
                     # Pick the word that looks like a dollar amount
@@ -91,7 +101,14 @@ def extract_warrant_data(pdf_path):
                         if len(remaining) >= 3 and not record["name"]:
                             record["name"] = remaining[0]
                             record["address"] = remaining[1]
-                            record["city_state_zip"] = remaining[2]
+                            csz_full = remaining[2]
+                            csz_parts = csz_full.rsplit(" ", 2)
+                            if len(csz_parts) == 3:
+                                record["city"] = csz_parts[0]
+                                record["state"] = csz_parts[1]
+                                record["zip_code"] = csz_parts[2]
+                            else:
+                                record["city"] = csz_full
                         break
 
                 # Look for total near "BALANCE DUE" line
@@ -132,7 +149,7 @@ def write_to_excel(all_records, output_path):
     )
 
     # Headers
-    headers = ["Name", "Address", "City, State, Zip", "Total", "Source File", "Page"]
+    headers = ["Name", "Address", "City", "State", "Zip Code", "Total", "Source File", "Page"]
     for col, header in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
@@ -146,7 +163,9 @@ def write_to_excel(all_records, output_path):
         values = [
             record["name"],
             record["address"],
-            record["city_state_zip"],
+            record["city"],
+            record["state"],
+            record["zip_code"],
             record["total"],
             record["source_file"],
             record["page"],
