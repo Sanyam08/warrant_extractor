@@ -53,40 +53,79 @@ def extract_warrant_data(pdf_path):
             words = page.extract_words()
 
             if words:
-                # --- Strategy 1: Position-based extraction ---
-                # The form layout is consistent:
-                #   Name line:       top ~130-136, x0 >= 70
-                #   Address line:    top ~145-150, x0 >= 70
-                #   City/State/Zip:  top ~160-165, x0 >= 70
-                #   Total amount:    top ~455-462, x0 >= 470
+                # --- Strategy 1: Marker-based extraction ---
+                # Find "collect forthwith from" line, then the next 3 lines are name/address/city
+                # Find "BALANCE DUE" line and grab the total amount on that line
 
-                name_words = [w for w in words if 125 < w["top"] < 140 and w["x0"] >= 65]
-                addr_words = [w for w in words if 140 < w["top"] < 155 and w["x0"] >= 65]
-                csz_words = [w for w in words if 155 < w["top"] < 170 and w["x0"] >= 65]
-                total_words = [w for w in words if 450 < w["top"] < 470 and w["x0"] >= 460]
+                # Build lines from words (group by top position)
+                lines_dict = {}
+                for w in words:
+                    top_rounded = round(w["top"], 0)
+                    if top_rounded not in lines_dict:
+                        lines_dict[top_rounded] = []
+                    lines_dict[top_rounded].append(w)
 
-                record["name"] = " ".join(w["text"] for w in name_words).strip()
-                record["address"] = " ".join(w["text"] for w in addr_words).strip()
-                csz_full = " ".join(w["text"] for w in csz_words).strip()
-                # Parse "MANCHESTER CT 06040-1234" into city, state, zip
-                csz_parts = csz_full.rsplit(" ", 2)  # split from right: [city, state, zip]
-                if len(csz_parts) == 3:
-                    record["city"] = csz_parts[0]
-                    record["state"] = csz_parts[1]
-                    record["zip_code"] = csz_parts[2]
-                else:
-                    record["city"] = csz_full
+                sorted_tops = sorted(lines_dict.keys())
 
-                if total_words:
-                    # Pick the word that looks like a dollar amount
-                    for tw in total_words:
-                        text = tw["text"].replace(",", "").replace("$", "")
-                        try:
-                            float(text)
-                            record["total"] = tw["text"]
+                # Find the "collect forthwith from" marker line
+                marker_idx = None
+                for i, top in enumerate(sorted_tops):
+                    line_text = " ".join(w["text"] for w in lines_dict[top])
+                    if "forthwith" in line_text.lower() or "collect" in line_text.lower() and "from" in line_text.lower():
+                        marker_idx = i
+                        break
+
+                if marker_idx is not None:
+                    # The name/address/city lines come after the marker
+                    # Look for the next 3 lines that start at x0 >= 60 (indented block)
+                    info_lines = []
+                    for j in range(marker_idx + 1, len(sorted_tops)):
+                        top = sorted_tops[j]
+                        line_words = sorted(lines_dict[top], key=lambda w: w["x0"])
+                        if line_words and line_words[0]["x0"] >= 55:
+                            line_text = " ".join(w["text"] for w in line_words).strip()
+                            if line_text and "sum of" not in line_text.lower():
+                                info_lines.append(line_text)
+                            if len(info_lines) == 3:
+                                break
+                        elif info_lines:
+                            # We've left the indented block
                             break
-                        except ValueError:
-                            continue
+
+                    if len(info_lines) >= 1:
+                        record["name"] = info_lines[0]
+                    if len(info_lines) >= 2:
+                        record["address"] = info_lines[1]
+                    if len(info_lines) >= 3:
+                        csz_full = info_lines[2]
+                        csz_parts = csz_full.rsplit(" ", 2)
+                        if len(csz_parts) == 3:
+                            record["city"] = csz_parts[0]
+                            record["state"] = csz_parts[1]
+                            record["zip_code"] = csz_parts[2]
+                        else:
+                            record["city"] = csz_full
+
+                # Find total near the "BALANCE DUE" line
+                for i, top in enumerate(sorted_tops):
+                    line_text = " ".join(w["text"] for w in lines_dict[top])
+                    if "balance due" in line_text.lower():
+                        # Check this line and nearby lines (within 5 pts) for a dollar amount
+                        nearby_words = []
+                        for nearby_top in sorted_tops:
+                            if abs(nearby_top - top) <= 5:
+                                nearby_words.extend(lines_dict[nearby_top])
+                        # Find the rightmost number
+                        nearby_words.sort(key=lambda w: w["x0"], reverse=True)
+                        for tw in nearby_words:
+                            text = tw["text"].replace(",", "").replace("$", "")
+                            try:
+                                float(text)
+                                record["total"] = tw["text"]
+                                break
+                            except ValueError:
+                                continue
+                        break
 
             # --- Strategy 2: Fallback text-based extraction ---
             if not record["name"] or not record["total"]:
